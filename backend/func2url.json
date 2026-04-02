@@ -1,0 +1,6 @@
+{
+  "casino-auth": "https://functions.poehali.dev/dc879f4a-9b31-41e2-9f61-292f5a2860c3",
+  "casino-transfer": "https://functions.poehali.dev/7dcc5548-6221-4a23-815a-6c4862d967e4",
+  "casino-games": "https://functions.poehali.dev/b7507abe-3c37-4671-9a9e-d629a8a6c5e4",
+  "casino-admin": "https://functions.poehali.dev/b85aabab-7dc5-4092-b463-9c357a025728"
+}
