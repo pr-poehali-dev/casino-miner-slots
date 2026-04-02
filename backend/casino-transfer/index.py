@@ -16,25 +16,26 @@ def handler(event: dict, context) -> dict:
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
 
-    path = event.get('path', '/')
     method = event.get('httpMethod', 'GET')
     body = json.loads(event.get('body') or '{}')
+    params = event.get('queryStringParameters') or {}
+
+    action = body.get('action') or params.get('action', '')
 
     conn = get_conn()
     cur = conn.cursor()
 
     try:
-        if path.endswith('/send') and method == 'POST':
+        # Перевод
+        if action == 'send':
             from_id = body.get('from_user_id')
             to_id = body.get('to_user_id')
             amount = float(body.get('amount', 0))
 
             if not from_id or not to_id or amount <= 0:
                 return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Неверные данные'})}
-
             if from_id == to_id:
                 return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Нельзя переводить самому себе'})}
-
             if amount < 1:
                 return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Минимальный перевод 1 К'})}
 
@@ -42,7 +43,6 @@ def handler(event: dict, context) -> dict:
             sender = cur.fetchone()
             if not sender:
                 return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Отправитель не найден'})}
-
             if float(sender[0]) < amount:
                 return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Недостаточно средств'})}
 
@@ -59,25 +59,18 @@ def handler(event: dict, context) -> dict:
                 (from_id, to_id, amount, f'Перевод: {sender[1]} → {receiver[0]}')
             )
             conn.commit()
-
-            return {
-                'statusCode': 200, 'headers': CORS,
-                'body': json.dumps({'success': True, 'balance': new_balance, 'to_username': receiver[0], 'amount': amount})
-            }
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'success': True, 'balance': new_balance, 'to_username': receiver[0], 'amount': amount})}
 
         # Поиск пользователя по ID
-        if path.endswith('/find') and method == 'GET':
-            params = event.get('queryStringParameters') or {}
-            target_id = params.get('user_id', '')
-
+        if action == 'find':
+            target_id = params.get('user_id') or body.get('user_id', '')
             cur.execute("SELECT user_id, username FROM casino_users WHERE user_id = %s AND is_banned = FALSE", (target_id,))
             row = cur.fetchone()
             if not row:
                 return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Пользователь не найден'})}
-
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'user_id': row[0], 'username': row[1]})}
 
-        return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Not found'})}
+        return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Not found', 'action': action})}
 
     finally:
         cur.close()

@@ -3,7 +3,6 @@ import json
 import os
 import random
 import psycopg2
-from decimal import Decimal
 
 CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -18,16 +17,16 @@ def handler(event: dict, context) -> dict:
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
 
-    path = event.get('path', '/')
     method = event.get('httpMethod', 'GET')
     body = json.loads(event.get('body') or '{}')
+    action = body.get('action', '')
 
     conn = get_conn()
     cur = conn.cursor()
 
     try:
         # === МИНЁР ===
-        if path.endswith('/miner/start') and method == 'POST':
+        if action == 'miner_start':
             user_id = body.get('user_id')
             bet = float(body.get('bet', 0))
             mines_count = int(body.get('mines', 3))
@@ -40,18 +39,11 @@ def handler(event: dict, context) -> dict:
             if not row or float(row[0]) < bet:
                 return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Недостаточно средств'})}
 
-            # Списываем ставку
             cur.execute("UPDATE casino_users SET balance = balance - %s WHERE user_id = %s RETURNING balance", (bet, user_id))
             new_balance = float(cur.fetchone()[0])
 
-            # Генерируем поле 5x5 = 25 клеток
-            positions = list(range(25))
-            mine_positions = random.sample(positions, mines_count)
-
-            cur.execute(
-                "INSERT INTO casino_transactions (from_user_id, amount, type, description) VALUES (%s, %s, 'bet', 'Минёр: ставка')",
-                (user_id, bet)
-            )
+            mine_positions = random.sample(list(range(25)), mines_count)
+            cur.execute("INSERT INTO casino_transactions (from_user_id, amount, type, description) VALUES (%s, %s, 'bet', 'Минёр: ставка')", (user_id, bet))
 
             game_data = {'mines': mine_positions, 'mines_count': mines_count, 'bet': bet, 'revealed': []}
             cur.execute(
@@ -60,13 +52,9 @@ def handler(event: dict, context) -> dict:
             )
             session_id = cur.fetchone()[0]
             conn.commit()
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'session_id': session_id, 'balance': new_balance, 'mines_count': mines_count})}
 
-            return {
-                'statusCode': 200, 'headers': CORS,
-                'body': json.dumps({'session_id': session_id, 'balance': new_balance, 'mines_count': mines_count})
-            }
-
-        if path.endswith('/miner/reveal') and method == 'POST':
+        if action == 'miner_reveal':
             user_id = body.get('user_id')
             session_id = body.get('session_id')
             cell = int(body.get('cell', 0))
@@ -80,16 +68,13 @@ def handler(event: dict, context) -> dict:
             bet = float(row[1])
 
             if cell in game_data['mines']:
-                # Попал на мину
                 cur.execute("UPDATE casino_game_sessions SET result = 'lose', game_data = %s WHERE id = %s", (json.dumps({**game_data, 'revealed': game_data['revealed'] + [cell]}), session_id))
                 conn.commit()
                 return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'result': 'mine', 'mines': game_data['mines']})}
 
             revealed = game_data['revealed'] + [cell]
-            safe_count = 25 - game_data['mines_count']
             revealed_count = len(revealed)
 
-            # Множитель
             multiplier = 1.0
             for i in range(revealed_count):
                 multiplier *= (25 - game_data['mines_count'] - i) / (25 - i)
@@ -99,13 +84,9 @@ def handler(event: dict, context) -> dict:
             game_data['revealed'] = revealed
             cur.execute("UPDATE casino_game_sessions SET game_data = %s WHERE id = %s", (json.dumps(game_data), session_id))
             conn.commit()
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'result': 'safe', 'revealed': revealed, 'multiplier': multiplier, 'potential_win': win_amount, 'can_cashout': True})}
 
-            return {
-                'statusCode': 200, 'headers': CORS,
-                'body': json.dumps({'result': 'safe', 'revealed': revealed, 'multiplier': multiplier, 'potential_win': win_amount, 'can_cashout': True})
-            }
-
-        if path.endswith('/miner/cashout') and method == 'POST':
+        if action == 'miner_cashout':
             user_id = body.get('user_id')
             session_id = body.get('session_id')
 
@@ -132,11 +113,10 @@ def handler(event: dict, context) -> dict:
             cur.execute("UPDATE casino_game_sessions SET result = 'win', win_amount = %s WHERE id = %s", (win_amount, session_id))
             cur.execute("INSERT INTO casino_transactions (to_user_id, amount, type, description) VALUES (%s, %s, 'win', 'Минёр: выигрыш')", (user_id, win_amount))
             conn.commit()
-
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'win': win_amount, 'multiplier': multiplier, 'balance': new_balance})}
 
         # === КРАШ ===
-        if path.endswith('/crash/start') and method == 'POST':
+        if action == 'crash_start':
             user_id = body.get('user_id')
             bet = float(body.get('bet', 0))
 
@@ -148,7 +128,6 @@ def handler(event: dict, context) -> dict:
             cur.execute("UPDATE casino_users SET balance = balance - %s WHERE user_id = %s RETURNING balance", (bet, user_id))
             new_balance = float(cur.fetchone()[0])
 
-            # Генерируем точку краша (взвешенное распределение)
             r = random.random()
             if r < 0.33:
                 crash_at = round(random.uniform(1.0, 1.5), 2)
@@ -168,10 +147,9 @@ def handler(event: dict, context) -> dict:
             )
             session_id = cur.fetchone()[0]
             conn.commit()
-
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'session_id': session_id, 'balance': new_balance, 'crash_at': crash_at})}
 
-        if path.endswith('/crash/cashout') and method == 'POST':
+        if action == 'crash_cashout':
             user_id = body.get('user_id')
             session_id = body.get('session_id')
             cashout_at = float(body.get('cashout_at', 1.0))
@@ -196,11 +174,10 @@ def handler(event: dict, context) -> dict:
             cur.execute("UPDATE casino_game_sessions SET result = 'win', win_amount = %s WHERE id = %s", (win_amount, session_id))
             cur.execute("INSERT INTO casino_transactions (to_user_id, amount, type, description) VALUES (%s, %s, 'win', 'Краш: выигрыш')", (user_id, win_amount))
             conn.commit()
-
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'result': 'win', 'win': win_amount, 'balance': new_balance})}
 
         # === СЛОТ КЛАССИЧЕСКИЙ ===
-        if path.endswith('/slot/spin') and method == 'POST':
+        if action == 'slot_spin':
             user_id = body.get('user_id')
             bet = float(body.get('bet', 0))
 
@@ -220,11 +197,9 @@ def handler(event: dict, context) -> dict:
                 col = random.choices(symbols, weights=weights, k=3)
                 reels.append(col)
 
-            # Проверяем выигрышные линии (средняя строка)
             line = [reels[0][1], reels[1][1], reels[2][1]]
             win = 0
             result = 'lose'
-
             multipliers = {'7️⃣': 50, '💎': 20, '⭐': 10, '🍒': 5, '🍇': 3, '🍊': 2, '🍋': 1.5}
 
             if line[0] == line[1] == line[2]:
@@ -244,11 +219,10 @@ def handler(event: dict, context) -> dict:
             cur.execute("INSERT INTO casino_game_sessions (user_id, game_type, bet_amount, win_amount, result, game_data) VALUES (%s, 'slot_classic', %s, %s, %s, %s)",
                 (user_id, bet, win, result, json.dumps({'reels': reels, 'line': line})))
             conn.commit()
-
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'reels': reels, 'win': win, 'result': result, 'balance': new_balance})}
 
         # === СЛОТ БОНУСНЫЙ ===
-        if path.endswith('/slot-bonus/spin') and method == 'POST':
+        if action == 'slot_bonus_spin':
             user_id = body.get('user_id')
             bet = float(body.get('bet', 0))
             buy_bonus = body.get('buy_bonus', False)
@@ -272,7 +246,6 @@ def handler(event: dict, context) -> dict:
             symbols = ['🎰', '🃏', '👑', '🔔', '💰', '🌟', '🎁']
             weights_normal = [25, 20, 15, 15, 12, 8, 5]
             weights_bonus = [15, 15, 15, 15, 15, 15, 10]
-
             w = weights_bonus if (buy_bonus or is_bonus_spin) else weights_normal
 
             reels = []
@@ -281,15 +254,12 @@ def handler(event: dict, context) -> dict:
                 reels.append(col)
 
             line = [reels[0][1], reels[1][1], reels[2][1]]
-
-            # Проверяем бонус символы (🎁) - 3 дают бонусную игру
             bonus_symbols = sum(1 for r in reels for s in r if s == '🎁')
             triggered_bonus = bonus_symbols >= 3 or buy_bonus
 
             win = 0
             result = 'lose'
             bonus_spins = 0
-
             multipliers = {'👑': 30, '💰': 20, '🌟': 15, '🔔': 8, '🃏': 4, '🎰': 2, '🎁': 5}
 
             if line[0] == line[1] == line[2]:
@@ -315,13 +285,9 @@ def handler(event: dict, context) -> dict:
             cur.execute("INSERT INTO casino_game_sessions (user_id, game_type, bet_amount, win_amount, result, game_data) VALUES (%s, 'slot_bonus', %s, %s, %s, %s)",
                 (user_id, bet, win, result, json.dumps({'reels': reels, 'bonus': triggered_bonus, 'bonus_spins': bonus_spins})))
             conn.commit()
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'reels': reels, 'win': win, 'result': result, 'balance': new_balance, 'bonus_triggered': triggered_bonus, 'bonus_spins': bonus_spins})}
 
-            return {
-                'statusCode': 200, 'headers': CORS,
-                'body': json.dumps({'reels': reels, 'win': win, 'result': result, 'balance': new_balance, 'bonus_triggered': triggered_bonus, 'bonus_spins': bonus_spins})
-            }
-
-        return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Not found'})}
+        return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Not found', 'action': action})}
 
     finally:
         cur.close()

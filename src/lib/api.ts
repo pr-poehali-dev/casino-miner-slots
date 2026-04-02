@@ -5,12 +5,25 @@ const URLS = {
   transfer: 'https://functions.poehali.dev/7dcc5548-6221-4a23-815a-6c4862d967e4',
 };
 
-async function req(base: string, path: string, method = 'GET', body?: object) {
-  const res = await fetch(base + path, {
-    method,
+async function post(url: string, body: object) {
+  const res = await fetch(url, {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
+    body: JSON.stringify(body),
   });
+  const text = await res.text();
+  try {
+    const data = JSON.parse(text);
+    if (typeof data === 'string') return JSON.parse(data);
+    return data;
+  } catch {
+    return { error: text };
+  }
+}
+
+async function get(url: string, params: Record<string, string>) {
+  const qs = new URLSearchParams(params).toString();
+  const res = await fetch(`${url}?${qs}`);
   const text = await res.text();
   try {
     const data = JSON.parse(text);
@@ -23,46 +36,46 @@ async function req(base: string, path: string, method = 'GET', body?: object) {
 
 export const api = {
   register: (username: string, password: string) =>
-    req(URLS.auth, '/register', 'POST', { username, password }),
+    post(URLS.auth, { action: 'register', username, password }),
   login: (username: string, password: string) =>
-    req(URLS.auth, '/login', 'POST', { username, password }),
+    post(URLS.auth, { action: 'login', username, password }),
   profile: (user_id: string) =>
-    req(URLS.auth, `/profile?user_id=${user_id}`),
+    get(URLS.auth, { action: 'profile', user_id }),
 
   minerStart: (user_id: string, bet: number, mines: number) =>
-    req(URLS.games, '/miner/start', 'POST', { user_id, bet, mines }),
+    post(URLS.games, { action: 'miner_start', user_id, bet, mines }),
   minerReveal: (user_id: string, session_id: number, cell: number) =>
-    req(URLS.games, '/miner/reveal', 'POST', { user_id, session_id, cell }),
+    post(URLS.games, { action: 'miner_reveal', user_id, session_id, cell }),
   minerCashout: (user_id: string, session_id: number) =>
-    req(URLS.games, '/miner/cashout', 'POST', { user_id, session_id }),
+    post(URLS.games, { action: 'miner_cashout', user_id, session_id }),
 
   crashStart: (user_id: string, bet: number) =>
-    req(URLS.games, '/crash/start', 'POST', { user_id, bet }),
+    post(URLS.games, { action: 'crash_start', user_id, bet }),
   crashCashout: (user_id: string, session_id: number, cashout_at: number) =>
-    req(URLS.games, '/crash/cashout', 'POST', { user_id, session_id, cashout_at }),
+    post(URLS.games, { action: 'crash_cashout', user_id, session_id, cashout_at }),
 
   slotSpin: (user_id: string, bet: number) =>
-    req(URLS.games, '/slot/spin', 'POST', { user_id, bet }),
+    post(URLS.games, { action: 'slot_spin', user_id, bet }),
   slotBonusSpin: (user_id: string, bet: number, buy_bonus = false, is_bonus_spin = false) =>
-    req(URLS.games, '/slot-bonus/spin', 'POST', { user_id, bet, buy_bonus, is_bonus_spin }),
+    post(URLS.games, { action: 'slot_bonus_spin', user_id, bet, buy_bonus, is_bonus_spin }),
 
   adminUsers: (admin_id: string) =>
-    req(URLS.admin, `/users?admin_id=${admin_id}`),
+    post(URLS.admin, { action: 'users', admin_id }),
   adminStats: (admin_id: string) =>
-    req(URLS.admin, `/stats?admin_id=${admin_id}`),
+    post(URLS.admin, { action: 'stats', admin_id }),
   adminGiveCoins: (admin_id: string, target_user_id: string, amount: number) =>
-    req(URLS.admin, '/give-coins', 'POST', { admin_id, target_user_id, amount }),
+    post(URLS.admin, { action: 'give_coins', admin_id, target_user_id, amount }),
   adminSetAdmin: (admin_id: string, target_user_id: string, is_admin: boolean) =>
-    req(URLS.admin, '/set-admin', 'POST', { admin_id, target_user_id, is_admin }),
+    post(URLS.admin, { action: 'set_admin', admin_id, target_user_id, is_admin }),
   adminBan: (admin_id: string, target_user_id: string, is_banned: boolean) =>
-    req(URLS.admin, '/ban', 'POST', { admin_id, target_user_id, is_banned }),
+    post(URLS.admin, { action: 'ban', admin_id, target_user_id, is_banned }),
   adminInitAdmin: (user_id: string, secret: string) =>
-    req(URLS.admin, '/init-admin', 'POST', { user_id, secret }),
+    post(URLS.admin, { action: 'init_admin', user_id, secret }),
 
   transferFind: (user_id: string) =>
-    req(URLS.transfer, `/find?user_id=${user_id}`),
+    post(URLS.transfer, { action: 'find', user_id }),
   transferSend: (from_user_id: string, to_user_id: string, amount: number) =>
-    req(URLS.transfer, '/send', 'POST', { from_user_id, to_user_id, amount }),
+    post(URLS.transfer, { action: 'send', from_user_id, to_user_id, amount }),
 };
 
 export type User = {

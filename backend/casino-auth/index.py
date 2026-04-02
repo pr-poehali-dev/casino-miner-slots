@@ -25,16 +25,19 @@ def handler(event: dict, context) -> dict:
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
 
-    path = event.get('path', '/')
     method = event.get('httpMethod', 'GET')
     body = json.loads(event.get('body') or '{}')
+    params = event.get('queryStringParameters') or {}
+
+    # Определяем действие из тела или query
+    action = body.get('action') or params.get('action', '')
 
     conn = get_conn()
     cur = conn.cursor()
 
     try:
         # Регистрация
-        if path.endswith('/register') and method == 'POST':
+        if action == 'register' and method == 'POST':
             username = body.get('username', '').strip()
             password = body.get('password', '')
 
@@ -48,7 +51,6 @@ def handler(event: dict, context) -> dict:
             if cur.fetchone():
                 return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Имя уже занято'})}
 
-            # Генерируем уникальный ID
             user_id = generate_user_id()
             for _ in range(10):
                 cur.execute("SELECT id FROM casino_users WHERE user_id = %s", (user_id,))
@@ -69,7 +71,7 @@ def handler(event: dict, context) -> dict:
             }
 
         # Вход
-        if path.endswith('/login') and method == 'POST':
+        if action == 'login' and method == 'POST':
             username = body.get('username', '').strip()
             password = body.get('password', '')
             pw_hash = hash_password(password)
@@ -90,8 +92,8 @@ def handler(event: dict, context) -> dict:
             }
 
         # Получить профиль
-        if path.endswith('/profile') and method == 'GET':
-            user_id = event.get('queryStringParameters', {}).get('user_id')
+        if action == 'profile' and method == 'GET':
+            user_id = params.get('user_id')
             if not user_id:
                 return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'user_id required'})}
 
@@ -103,7 +105,6 @@ def handler(event: dict, context) -> dict:
             if not row:
                 return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Пользователь не найден'})}
 
-            # История транзакций
             cur.execute(
                 "SELECT type, amount, description, created_at FROM casino_transactions WHERE from_user_id = %s OR to_user_id = %s ORDER BY created_at DESC LIMIT 20",
                 (user_id, user_id)
@@ -118,7 +119,7 @@ def handler(event: dict, context) -> dict:
                 })
             }
 
-        return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Not found'})}
+        return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Not found', 'action': action})}
 
     finally:
         cur.close()

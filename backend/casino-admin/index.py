@@ -21,19 +21,19 @@ def handler(event: dict, context) -> dict:
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
 
-    path = event.get('path', '/')
     method = event.get('httpMethod', 'GET')
     body = json.loads(event.get('body') or '{}')
     params = event.get('queryStringParameters') or {}
+
+    action = body.get('action') or params.get('action', '')
+    admin_id = body.get('admin_id') or params.get('admin_id')
 
     conn = get_conn()
     cur = conn.cursor()
 
     try:
-        admin_id = body.get('admin_id') or params.get('admin_id')
-
         # Список всех пользователей
-        if path.endswith('/users') and method == 'GET':
+        if action == 'users':
             if not check_admin(cur, admin_id):
                 return {'statusCode': 403, 'headers': CORS, 'body': json.dumps({'error': 'Нет доступа'})}
 
@@ -54,7 +54,7 @@ def handler(event: dict, context) -> dict:
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'users': users})}
 
         # Статистика
-        if path.endswith('/stats') and method == 'GET':
+        if action == 'stats':
             if not check_admin(cur, admin_id):
                 return {'statusCode': 403, 'headers': CORS, 'body': json.dumps({'error': 'Нет доступа'})}
 
@@ -67,13 +67,10 @@ def handler(event: dict, context) -> dict:
             cur.execute("SELECT COALESCE(SUM(win_amount), 0) FROM casino_game_sessions WHERE result = 'win'")
             total_wins = float(cur.fetchone()[0])
 
-            return {
-                'statusCode': 200, 'headers': CORS,
-                'body': json.dumps({'total_users': total_users, 'total_games': total_games, 'total_bets': total_bets, 'total_wins': total_wins})
-            }
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'total_users': total_users, 'total_games': total_games, 'total_bets': total_bets, 'total_wins': total_wins})}
 
-        # Выдать монеты пользователю
-        if path.endswith('/give-coins') and method == 'POST':
+        # Выдать монеты
+        if action == 'give_coins':
             if not check_admin(cur, admin_id):
                 return {'statusCode': 403, 'headers': CORS, 'body': json.dumps({'error': 'Нет доступа'})}
 
@@ -90,7 +87,7 @@ def handler(event: dict, context) -> dict:
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'new_balance': float(row[0])})}
 
         # Назначить/снять администратора
-        if path.endswith('/set-admin') and method == 'POST':
+        if action == 'set_admin':
             if not check_admin(cur, admin_id):
                 return {'statusCode': 403, 'headers': CORS, 'body': json.dumps({'error': 'Нет доступа'})}
 
@@ -106,7 +103,7 @@ def handler(event: dict, context) -> dict:
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'success': True})}
 
         # Забанить/разбанить
-        if path.endswith('/ban') and method == 'POST':
+        if action == 'ban':
             if not check_admin(cur, admin_id):
                 return {'statusCode': 403, 'headers': CORS, 'body': json.dumps({'error': 'Нет доступа'})}
 
@@ -121,8 +118,8 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'success': True})}
 
-        # Первичная установка первого администратора (по секретному коду)
-        if path.endswith('/init-admin') and method == 'POST':
+        # Первичная установка первого администратора
+        if action == 'init_admin':
             secret = body.get('secret')
             target_id = body.get('user_id')
 
@@ -137,7 +134,7 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'success': True})}
 
-        return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Not found'})}
+        return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Not found', 'action': action})}
 
     finally:
         cur.close()
